@@ -63,3 +63,39 @@ API docs at `http://127.0.0.1:8000/docs`
 - `GET /api/actions/pending` - Get queued actions (n8n polls this)
 - `POST /api/actions/complete` - Mark an action as done
 - `GET /api/actions/history` - View all actions
+
+## Architecture
+
+```mermaid
+graph TD
+    User([You]) --> Streamlit[Streamlit UI]
+    Streamlit -->|POST /api/ask| FastAPI[FastAPI Backend]
+    Streamlit -->|POST /api/ingest| FastAPI
+
+    FastAPI --> Agent[LangGraph ReAct Agent]
+
+    Agent -->|tool call| SearchDocs[search_home_docs]
+    Agent -->|tool call| WebSearch[web_search]
+    Agent -->|tool call| ImageAnalysis[analyze_image]
+    Agent -->|tool call| RequestAction[request_action]
+
+    SearchDocs --> Pinecone[(Pinecone)]
+    WebSearch --> DuckDuckGo[DuckDuckGo API]
+    ImageAnalysis --> OpenAI[OpenAI Vision]
+    Agent -->|reasoning| OpenAI
+
+    RequestAction --> Queue[Action Queue]
+
+    n8n[n8n on Raspberry Pi] -->|GET /api/actions/pending| Queue
+    n8n -->|POST /api/actions/complete| Queue
+    n8n --> Calendar[Google Calendar]
+    n8n --> Tasks[Task List]
+    n8n --> Notify[Slack / Email]
+
+    FastAPI -->|ingest| Loader[PDF/Text Loader]
+    Loader --> Chunker[Text Splitter]
+    Chunker --> Embeddings[OpenAI Embeddings]
+    Embeddings --> Pinecone
+
+    Agent -.->|tracing| LangSmith[LangSmith Dashboard]
+```
