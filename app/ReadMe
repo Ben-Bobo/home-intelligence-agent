@@ -1,0 +1,401 @@
+# Home Intelligence Agent — Revised Architecture Plan
+
+---
+
+## Project Overview
+
+A FastAPI + LangGraph ReAct agent that answers questions about your home using your
+actual documents as its knowledge base. The agent autonomously decides which tools
+to call — RAG search over your documents, web search, or image analysis. It maintains
+conversation memory within a session and outputs structured actions that n8n executes
+(calendar events, tasks, notifications).
+
+---
+
+## Architecture Summary
+
+```
+┌─────────────────────────────────────────────────┐
+│                  STREAMLIT UI                    │
+│  (You type questions, upload photos, see answers)│
+└──────────────────────┬──────────────────────────┘
+                       ↓
+┌─────────────────────────────────────────────────┐
+│                 FastAPI (Render)                  │
+│                                                  │
+│  POST /api/ask     → runs LangGraph agent        │
+│  POST /api/ingest  → uploads docs to Pinecone    │
+│  GET  /api/actions/pending  → n8n polls this     │
+│  POST /api/actions/complete → n8n marks done     │
+│                                                  │
+│  After agent finishes:                           │
+│    1. Returns answer to Streamlit immediately    │
+│    2. Stores any actions in pending queue        │
+└──────────────────────┬──────────────────────────┘
+                       │
+          ┌────────────┼────────────────┐
+          ↓            ↓                ↓
+    ┌──────────┐ ┌──────────┐  ┌──────────────┐
+    │ Pinecone │ │  OpenAI  │  │  Web Search  │
+    │  (RAG)   │ │  (LLM +  │  │  (tool)      │
+    │          │ │  Vision) │  │              │
+    └──────────┘ └──────────┘  └──────────────┘
+
+          n8n (Raspberry Pi, polls every 30s)
+    ┌─────────────────────────────────────────┐
+    │  GET /api/actions/pending               │
+    │       ↓                                 │
+    │  Switch on action type:                 │
+    │    ├── add_calendar_event → Google Cal   │
+    │    ├── create_task → Google Sheets/Notion│
+    │    └── send_notification → Slack/Email   │
+    │       ↓                                 │
+    │  POST /api/actions/complete             │
+    └─────────────────────────────────────────┘
+```
+
+---
+
+## The Three Layers
+
+| Layer | Job | Rule |
+|---|---|---|
+| Streamlit | Human talks to agent | Dumb UI — sends requests, displays results |
+| FastAPI + LangGraph | The brain | All reasoning, tool calls, document retrieval |
+| n8n | Things that happen without you asking | Automated execution of actions, scheduled workflows |
+
+**The test:** Did a human ask for it right now? → Streamlit → FastAPI.
+Did the agent need external info to answer? → FastAPI tool.
+Did nobody ask, it just happens? → n8n.
+
+---
+
+## Agent Architecture (ReAct Pattern)
+
+```
+User question (text or image, with thread_id for memory)
+        ↓
+    agent_reasoning (LLM with all tools bound) ←──┐
+        ↓                                         │
+    Has tool calls?                               │
+      ↓           ↓                               │
+     yes          no                              │
+      ↓           ↓                               │
+  execute_tools   build_response → END            │
+      ↓                                           │
+      └──── back to agent_reasoning               │
+```
+
+The agent decides everything. It reasons about what it needs, calls tools
+if necessary (maybe RAG, maybe web search, maybe both, maybe neither),
+gets results, reasons again, and eventually gives a final answer.
+
+No hardcoded pipeline. No forced retrieval. The LLM is in the driver's seat.
+
+### Tools (called during reasoning — agent needs the result to answer)
+
+| Tool | What it does | When the agent uses it |
+|---|---|---|
+| search_home_docs | Search your documents in Pinecone via RAG | Question references your specific home/documents |
+| web_search | Search the web for current info | Needs pricing, contractors, general knowledge |
+| analyze_image | Analyze a photo using GPT vision | User uploaded a photo ("what is this?") |
+
+### Actions (output after reasoning — agent doesn't need the result)
+
+| Action | What happens |
+|---|---|
+| add_calendar_event | n8n creates a Google Calendar event |
+| create_task | n8n adds to a task list (Sheets/Notion) |
+| send_notification | n8n sends a Slack message or email |
+
+### Action Registry (app/agent/actions.py — single source of truth)
+
+```python
+AVAILABLE_ACTIONS = [
+    {
+        "type": "add_calendar_event",
+        "description": "Add an event or recurring task to the user's Google Calendar",
+        "required_fields": {
+            "title": "Event title",
+            "date": "Start date (ISO format) or 'recurring'",
+            "frequency": "once / daily / weekly / monthly (only if recurring)",
+            "notes": "Additional details"
+        }
+    },
+    {
+        "type": "create_task",
+        "description": "Add a task to the user's home maintenance todo list",
+        "required_fields": {
+            "title": "Task description",
+            "priority": "low / medium / high",
+            "category": "maintenance / repair / improvement"
+        }
+    },
+    {
+        "type": "send_notification",
+        "description": "Send the user an alert via Slack or email about something urgent",
+        "required_fields": {
+            "message": "The notification content",
+            "urgency": "normal / urgent"
+        }
+    }
+]
+
+VALID_ACTION_TYPES = {a["type"] for a in AVAILABLE_ACTIONS}
+```
+
+Adding a new action = add entry here + add branch in n8n. Agent sees it automatically.
+
+---
+
+## n8n Integration (Polling Pattern)
+
+n8n can't be reached from Render (it's on a local Raspberry Pi), so n8n
+pulls instead of FastAPI pushing.
+
+```
+n8n (every 30 seconds):
+    → GET /api/actions/pending
+    → If actions exist:
+        → Switch node routes by action type
+        → Execute (Google Calendar, Sheets, Slack, etc.)
+        → POST /api/actions/complete (marks each action done)
+```
+
+### FastAPI action queue endpoints
+
+```
+GET  /api/actions/pending   → returns list of unexecuted actions
+POST /api/actions/complete  → { "action_id": "..." } marks action done
+```
+
+Actions are stored with a unique ID, timestamp, status (pending/complete),
+and the action payload. Storage options: simple JSON file, SQLite, or a
+Pinecone metadata-only entry. SQLite is the cleanest for this.
+
+---
+
+## Agent State Schema
+
+```python
+from typing import TypedDict, Optional, Annotated
+from langchain_core.messages import BaseMessage
+from langgraph.graph import add_messages
+
+
+class AgentState(TypedDict):
+    question: str
+    image: Optional[str]                            # base64 image if provided
+    thread_id: Optional[str]                         # session ID for memory
+    messages: Annotated[list[BaseMessage], add_messages]  # full conversation
+    actions: list[dict]                              # structured actions for n8n
+    answer: str                                      # final answer
+    error: Optional[str]
+```
+
+Key changes from the linear version:
+- `image` — supports "what is this?" photo questions
+- `thread_id` — session identifier for conversation memory
+- `messages` with `add_messages` reducer — this is the core of the ReAct loop.
+  Every LLM response, tool call, and tool result gets appended here. The
+  `add_messages` annotation tells LangGraph to append rather than overwrite.
+  This is also what the checkpointer persists for memory.
+- `actions` — structured intents for n8n to execute
+- `retrieved_chunks` is gone — RAG is now a tool, results come back through messages
+- `reasoning_steps` is gone — LangSmith traces this automatically, and the
+  messages list shows every step the agent took
+- `sources` is gone — the agent cites sources in its answer text naturally
+- `category` and `urgency` are gone — the agent handles these implicitly
+
+---
+
+## Updated Folder Structure
+
+```
+home-intelligence-agent/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                    # FastAPI entry point
+│   ├── config.py                  # Pydantic settings
+│   ├── logger.py                  # Shared logger
+│   ├── errors.py                  # Custom exceptions
+│   ├── routes/
+│   │   ├── __init__.py
+│   │   ├── ingest.py              # POST /api/ingest
+│   │   ├── ask.py                 # POST /api/ask
+│   │   └── actions.py             # GET/POST /api/actions
+│   ├── agent/
+│   │   ├── __init__.py
+│   │   ├── graph.py               # LangGraph ReAct graph
+│   │   ├── state.py               # Agent state schema
+│   │   ├── actions.py             # Action registry
+│   │   ├── tools/
+│   │   │   ├── __init__.py
+│   │   │   ├── search_home_docs.py # RAG search over Pinecone
+│   │   │   ├── web_search.py      # Web search tool
+│   │   │   └── image_analysis.py  # Vision analysis tool
+│   │   └── nodes/
+│   │       ├── __init__.py
+│   │       ├── reasoning.py       # ReAct agent node (LLM + tools)
+│   │       └── execute_tools.py   # Tool execution node
+│   ├── rag/
+│   │   ├── __init__.py
+│   │   ├── vectorstore.py         # Pinecone connection
+│   │   ├── loader.py              # Document loading + chunking
+│   │   └── ingestor.py            # Orchestrates ingestion
+│   ├── actions/
+│   │   ├── __init__.py
+│   │   ├── queue.py               # Action queue (SQLite)
+│   │   └── dispatcher.py          # Sends actions to queue after agent
+│   └── models/
+│       ├── __init__.py
+│       ├── requests.py            # Pydantic request schemas
+│       └── responses.py           # Pydantic response schemas
+├── data/
+│   └── sample_docs/
+├── evals/
+│   ├── dataset.json
+│   └── run_evals.py
+├── tests/
+│   ├── __init__.py
+│   ├── test_agent.py
+│   ├── test_ingest.py
+│   ├── test_ask.py
+│   └── test_actions.py
+├── .github/
+│   └── workflows/
+│       ├── dev.yml
+│       └── prod.yml
+├── streamlit_app.py
+├── .env
+├── .env.example
+├── .gitignore
+├── requirements.txt
+├── Dockerfile
+└── README.md
+```
+
+---
+
+## Build Phases
+
+### Phase 1 — Project Setup ✅ DONE
+Repo, venv, dependencies, config, logger, errors, FastAPI running.
+
+### Phase 2 — Document Ingestion ✅ DONE
+Loader, chunker, Pinecone vectorstore, POST /api/ingest working.
+
+### Phase 3a — Linear Agent ✅ DONE
+Basic linear graph (retrieve → classify → reason → assess_urgency → respond).
+Proved the pattern works. Will be replaced by ReAct version.
+
+### Phase 3b — ReAct Agent Conversion
+- Remove ALL linear nodes (classify, assess_urgency, respond, retrieve)
+- Update state schema with messages, image, actions, thread_id fields
+- Create search_home_docs tool (RAG — wraps existing vectorstore.retrieve_similar)
+- Create web_search tool
+- Create image_analysis tool
+- Build reasoning node with all tools bound to LLM
+- Build execute_tools node
+- Build ReAct graph with conditional loop
+- Handle max iterations, tool errors, token budget
+- Inject available actions into agent system prompt
+- Agent outputs structured actions in state
+
+### Phase 3c — Session Memory
+- Add MemorySaver checkpointer to graph.compile()
+- Pass thread_id from API request through to agent invocation
+- Agent remembers previous messages within the same thread
+- Update /api/ask to accept optional thread_id
+- Streamlit maintains a thread_id per session
+- Memory is in-process only (resets on server restart — not persistent)
+- Persistent memory (PostgresSaver) pinned as future work
+
+### Phase 4 — Action Queue
+- Create SQLite-based action queue
+- Create dispatcher (stores actions after agent finishes)
+- Create GET /api/actions/pending endpoint
+- Create POST /api/actions/complete endpoint
+- Update ask route to dispatch actions after agent returns
+
+### Phase 5 — Logging & LangSmith ✅ DONE
+Python logging in all nodes. LangSmith tracing verified.
+
+### Phase 6 — Evals
+- Gold standard Q&A dataset
+- Eval runner using LangSmith
+- Test answer relevance, tool selection accuracy, action correctness
+- Evals gate prod deploys in GitHub Actions
+
+### Phase 7 — Tests
+- Unit tests for tools, action queue, agent nodes
+- Integration tests for API endpoints
+- Mock LLM calls for deterministic testing
+
+### Phase 8 — GitHub & CI/CD
+- Branch strategy (dev → main)
+- GitHub Actions: test on dev, test + eval on main
+- Deploy hooks to Render
+
+### Phase 9 — Render Deployment
+- Dev and prod Render services
+- Environment variables configured
+- Deploy hooks wired to GitHub Actions
+
+### Phase 10 — Streamlit UI
+- Chat interface (not single Q&A — maintains thread_id per session)
+- Image upload for "what is this?" questions
+- Document upload for ingestion
+- View action history (pending/completed)
+- Deploy to Streamlit Cloud pointing at prod API
+
+### Phase 11 — n8n Workflows
+- Polling workflow: GET /api/actions/pending every 30s
+- Switch node routing by action type
+- Google Calendar integration
+- Task list integration (Sheets or Notion)
+- Notification integration (Slack or email)
+- POST /api/actions/complete after execution
+- Auto-ingest workflow: Google Drive watch → POST /api/ingest
+
+---
+
+## Environment Variable Reference
+
+| Variable | Dev | Prod |
+|---|---|---|
+| ENVIRONMENT | development | production |
+| OPENAI_API_KEY | your key | your key |
+| OPENAI_MODEL | gpt-4o-mini | gpt-4o-mini |
+| PINECONE_API_KEY | your key | your key |
+| PINECONE_INDEX_NAME | home-intelligence | home-intelligence |
+| LANGCHAIN_API_KEY | your key | your key |
+| LANGCHAIN_PROJECT | home-intelligence-agent-dev | home-intelligence-agent-prod |
+| LANGCHAIN_TRACING_V2 | true | true |
+
+---
+
+## What You'll Be Able to Say on Day One
+
+*"I built a production LangGraph ReAct agent for home intelligence. The agent
+reasons autonomously and decides which tools to call — it can search my home
+documents via RAG in Pinecone, search the web for contractors and pricing, and
+analyze photos of things around the house. It maintains conversation memory
+within a session so I can ask follow-up questions naturally. The agent also
+outputs structured actions like calendar events and tasks, which get queued
+and executed by an n8n automation layer running on a Raspberry Pi that polls
+the API. The whole thing has a Streamlit frontend, FastAPI backend, structured
+logging, LangSmith tracing, evals gating production deploys, and CI/CD
+through GitHub Actions."*
+
+---
+
+## Part 2 (Future — Pinned Ideas)
+
+- Persistent conversation memory via PostgresSaver (survives server restarts)
+- RAG validation (are the retrieved docs actually relevant before using them?)
+- Answer groundedness check (is the answer supported by the docs?)
+- Multi-agent coordination (separate agents for documents, costs, scheduling)
+- Proactive n8n workflows (seasonal maintenance reminders, warranty expiration alerts)
+- Additional tools (appliance recall lookup, permit requirement search, cost calculator)
+- Conversation history endpoint (GET /api/threads/{thread_id}/history)

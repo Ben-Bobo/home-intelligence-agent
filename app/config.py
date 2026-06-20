@@ -1,0 +1,44 @@
+from pydantic_settings import BaseSettings
+from functools import lru_cache
+
+
+class Settings(BaseSettings):
+    # App
+    app_name: str = "Home Intelligence Agent"
+    environment: str = "development"
+    debug: bool = False
+
+    # OpenAI
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_timeout: int = 30
+
+    # Pinecone
+    pinecone_api_key: str = ""
+    pinecone_index_name: str = "home-intelligence"
+    rag_top_k: int = 4
+
+    # Chunking
+    chunk_size: int = 800
+    chunk_overlap: int = 100
+
+    # LangSmith
+    langchain_api_key: str = ""
+    langchain_tracing_v2: bool = True
+    langchain_project: str = "home-intelligence-agent"
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment == "production"
+
+    @property
+    def log_level(self) -> str:
+        return "INFO" if self.is_production else "DEBUG"
+
+    class Config:
+        env_file = ".env"
+
+
+@lru_cache()
+def get_settings() -> Settings:
+    return Settings()
