@@ -1,8 +1,11 @@
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
+    model_config = ConfigDict(env_file=".env")
+
     # App
     app_name: str = "Home Intelligence Agent"
     environment: str = "development"
@@ -34,9 +37,6 @@ class Settings(BaseSettings):
     @property
     def log_level(self) -> str:
         return "INFO" if self.is_production else "DEBUG"
-
-    class Config:
-        env_file = ".env"
 
 
 @lru_cache()
