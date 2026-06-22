@@ -5,9 +5,11 @@ from app.rag.ingestor import ingest_document
 from app.models.responses import IngestResponse
 from app.errors import DocumentIngestionError
 from app.logger import get_logger
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from app.auth import verify_api_key
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
 

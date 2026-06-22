@@ -1,8 +1,7 @@
 import io
-from fastapi.testclient import TestClient
-from app.main import app
+from tests.conftest import get_client
 
-client = TestClient(app)
+client = get_client()
 
 
 def test_ingest_rejects_unsupported_file():

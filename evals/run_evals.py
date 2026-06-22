@@ -113,14 +113,17 @@ def run_evals():
 
             # LLM-as-judge for answer quality
             actions = extract_actions(messages)
-            judge_scores = llm_judge(item["question"], answer, actions_taken=actions,reference_answer=item.get("reference_answer"))
-            avg_quality = (
-                judge_scores.get("relevance", 0) +
-                judge_scores.get("groundedness", 0) +
-                judge_scores.get("completeness", 0)
-            ) / 3
+            judge_scores = llm_judge(item["question"], answer, actions_taken=actions, reference_answer=item.get("reference_answer"))
+            
+            relevance = judge_scores.get("relevance", 0)
+            groundedness = judge_scores.get("groundedness", 0)
+            completeness = judge_scores.get("completeness", 0)
+            avg_quality = (relevance + groundedness + completeness) / 3
+            
             results["answer_quality"]["scores"].append(avg_quality)
-            answer_good = avg_quality >= 0.6
+            
+            MIN_SCORE = 0.3
+            answer_good = avg_quality >= 0.6 and relevance >= MIN_SCORE and groundedness >= MIN_SCORE and completeness >= MIN_SCORE
 
             # Check action correctness
             actions = extract_actions(messages)

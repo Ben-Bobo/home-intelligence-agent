@@ -24,7 +24,12 @@ jobs:
           PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
           PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
           LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+          API_SECRET_KEY: ${{ secrets.API_SECRET_KEY }}
           LANGCHAIN_TRACING_V2: "true"
           LANGCHAIN_PROJECT: "home-intelligence-agent-dev"
           ENVIRONMENT: "development"
-        run: pytest tests/ -v 
+        run: pytest tests/ -v
+
+      - name: Deploy to Render
+        if: success()
+        run: curl -X POST "${{ secrets.RENDER_DEV_DEPLOY_HOOK }}"

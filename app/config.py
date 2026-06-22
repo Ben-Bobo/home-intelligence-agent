@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     app_name: str = "Home Intelligence Agent"
     environment: str = "development"
     debug: bool = False
+    
+    # Auth
+    api_secret_key: str = ""
 
     # OpenAI
     openai_api_key: str = ""

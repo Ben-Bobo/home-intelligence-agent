@@ -7,9 +7,12 @@ from app.queue import action_queue
 from app.models.requests import AskRequest
 from app.models.responses import AskResponse, ActionOut
 from app.logger import get_logger
+from fastapi import APIRouter, HTTPException, Depends
+from app.auth import verify_api_key
+
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
 def extract_actions(messages: list) -> list[dict]:
