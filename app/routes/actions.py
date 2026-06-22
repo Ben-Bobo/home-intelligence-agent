@@ -2,9 +2,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.queue import action_queue
 from app.logger import get_logger
+from fastapi import APIRouter, HTTPException, Depends
+from app.auth import verify_api_key
 
 logger = get_logger(__name__)
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
 class CompleteRequest(BaseModel):
