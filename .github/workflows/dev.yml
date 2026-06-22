@@ -27,4 +27,8 @@ jobs:
           LANGCHAIN_TRACING_V2: "true"
           LANGCHAIN_PROJECT: "home-intelligence-agent-dev"
           ENVIRONMENT: "development"
-        run: pytest tests/ -v 
+        run: pytest tests/ -v
+
+      - name: Deploy to Render
+        if: success()
+        run: curl -X POST "${{ secrets.RENDER_DEV_DEPLOY_HOOK }}"
