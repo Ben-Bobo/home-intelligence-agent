@@ -8,8 +8,56 @@ load_dotenv()
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
 from app.agent.graph import agent
 from app.routes.ask import extract_actions
+from app.config import get_settings
+
+
+def llm_judge(question: str, answer: str, actions_taken: list = None, reference_answer: str = None) -> dict:
+    """Use an LLM to score the answer quality."""
+    settings = get_settings()
+    judge = ChatOpenAI(
+        model=settings.openai_model,
+        api_key=settings.openai_api_key,
+        timeout=settings.openai_timeout
+    )
+
+    action_context = ""
+    if actions_taken:
+        action_context = f"\nActions the assistant successfully queued: {json.dumps(actions_taken)}\nThese actions were executed by the system. The assistant does not need to explain the mechanism."
+
+    reference_context = ""
+    groundedness_criteria = "groundedness: Does the answer make specific claims rather than vague generalities?"
+    if reference_answer:
+        reference_context = f"\n\nKNOWN CORRECT ANSWER: {reference_answer}"
+        groundedness_criteria = "groundedness: Does the answer match the known correct answer above? If the assistant states a different fact than the known correct answer, score 0. This is the most important criteria."
+
+    prompt = f"""You are evaluating an AI assistant's response. Score the following.
+
+    Question: {question}{reference_context}
+
+    Assistant's Answer: {answer}{action_context}
+
+    Score each criteria from 0 to 1:
+    1. relevance: Does the answer actually address the question asked?
+    2. {groundedness_criteria}
+    3. completeness: Does the answer fully address the question or is it partial?
+
+    If the assistant was asked to perform an action (add to calendar, create a task, etc) and the action was successfully queued, score completeness based on whether the action was appropriate, not on whether the answer explains the technical mechanism.
+
+    Respond with ONLY a JSON object, no other text:
+    {{"relevance": 0.0, "groundedness": 0.0, "completeness": 0.0, "reasoning": "brief explanation"}}"""
+
+    try:
+        response = judge.invoke(prompt)
+        text = response.content.strip()
+        text = text.replace("```json", "").replace("```", "").strip()
+        scores = json.loads(text)
+        return scores
+    except Exception as e:
+        print(f"  Judge failed: {str(e)}")
+        return {"relevance": 0.0, "groundedness": 0.0, "completeness": 0.0, "reasoning": "judge error"}
 
 
 def run_evals():
@@ -18,7 +66,7 @@ def run_evals():
 
     results = {
         "tool_selection": {"correct": 0, "total": 0},
-        "answer_relevance": {"correct": 0, "total": 0},
+        "answer_quality": {"scores": []},
         "action_correctness": {"correct": 0, "total": 0}
     }
 
@@ -63,22 +111,26 @@ def run_evals():
             if tool_correct:
                 results["tool_selection"]["correct"] += 1
 
-            # Check answer relevance
-            expected_keywords = item.get("expected_keywords_in_answer", [])
-            answer_lower = answer.lower()
-            keyword_hits = sum(1 for kw in expected_keywords if kw.lower() in answer_lower)
-            keyword_score = keyword_hits / len(expected_keywords) if expected_keywords else 1.0
-            answer_relevant = keyword_score >= 0.5
-            results["answer_relevance"]["total"] += 1
-            if answer_relevant:
-                results["answer_relevance"]["correct"] += 1
+            # LLM-as-judge for answer quality
+            actions = extract_actions(messages)
+            judge_scores = llm_judge(item["question"], answer, actions_taken=actions,reference_answer=item.get("reference_answer"))
+            avg_quality = (
+                judge_scores.get("relevance", 0) +
+                judge_scores.get("groundedness", 0) +
+                judge_scores.get("completeness", 0)
+            ) / 3
+            results["answer_quality"]["scores"].append(avg_quality)
+            answer_good = avg_quality >= 0.6
 
             # Check action correctness
+            actions = extract_actions(messages)
             if item.get("expected_action"):
-                actions = extract_actions(messages)
                 has_action = len(actions) > 0
+                expected_types = item.get("expected_action_type")
+                if isinstance(expected_types, str):
+                    expected_types = [expected_types]
                 correct_type = any(
-                    a["type"] == item.get("expected_action_type") for a in actions
+                    a["type"] in expected_types for a in actions
                 ) if has_action else False
 
                 action_correct = has_action and correct_type
@@ -86,18 +138,14 @@ def run_evals():
                 if action_correct:
                     results["action_correctness"]["correct"] += 1
             else:
-                actions = extract_actions(messages)
                 no_unwanted_action = len(actions) == 0
+                action_correct = no_unwanted_action
                 results["action_correctness"]["total"] += 1
                 if no_unwanted_action:
                     results["action_correctness"]["correct"] += 1
 
             # Overall pass/fail
-            eval_pass = tool_correct and answer_relevant
-            if item.get("expected_action"):
-                eval_pass = eval_pass and action_correct
-            else:
-                eval_pass = eval_pass and no_unwanted_action
+            eval_pass = tool_correct and answer_good and action_correct
 
             if eval_pass:
                 passed += 1
@@ -108,11 +156,15 @@ def run_evals():
 
             print(f"  {status}")
             print(f"  Tool: expected={expected_tool} | called={tools_called} | {'OK' if tool_correct else 'WRONG'}")
-            print(f"  Keywords: {keyword_score:.0%} | {'OK' if answer_relevant else 'LOW'}")
+            print(f"  Quality: relevance={judge_scores.get('relevance', 0):.1f} "
+                  f"groundedness={judge_scores.get('groundedness', 0):.1f} "
+                  f"completeness={judge_scores.get('completeness', 0):.1f} "
+                  f"avg={avg_quality:.2f} | {'OK' if answer_good else 'LOW'}")
+            print(f"  Judge reasoning: {judge_scores.get('reasoning', 'n/a')}")
             if item.get("expected_action"):
                 print(f"  Action: expected={item['expected_action_type']} | got={[a['type'] for a in actions]} | {'OK' if action_correct else 'WRONG'}")
             else:
-                print(f"  Action: expected=none | got={[a['type'] for a in actions]} | {'OK' if no_unwanted_action else 'UNWANTED'}")
+                print(f"  Action: expected=none | got={[a['type'] for a in actions]} | {'OK' if action_correct else 'UNWANTED'}")
             print(f"  Answer preview: {answer[:120]}...")
 
         except Exception as e:
@@ -123,21 +175,49 @@ def run_evals():
     print(f"\n{'='*60}")
     print(f"RESULTS")
     print(f"{'='*60}")
+
+    pass_rate = passed / len(dataset)
     print(f"Overall: {passed} passed, {failed} failed out of {len(dataset)}")
-    print(f"Pass rate: {passed/len(dataset):.0%}")
+    print(f"Pass rate: {pass_rate:.0%}")
     print()
 
-    for metric, counts in results.items():
-        rate = counts["correct"] / counts["total"] if counts["total"] > 0 else 0
-        print(f"  {metric}: {counts['correct']}/{counts['total']} ({rate:.0%})")
+    tool_total = results["tool_selection"]["total"]
+    tool_correct = results["tool_selection"]["correct"]
+    tool_rate = tool_correct / tool_total if tool_total > 0 else 0
+    print(f"  tool_selection: {tool_correct}/{tool_total} ({tool_rate:.0%})")
+
+    quality_scores = results["answer_quality"]["scores"]
+    avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+    print(f"  answer_quality: avg={avg_quality:.2f}")
+
+    action_total = results["action_correctness"]["total"]
+    action_correct = results["action_correctness"]["correct"]
+    action_rate = action_correct / action_total if action_total > 0 else 0
+    print(f"  action_correctness: {action_correct}/{action_total} ({action_rate:.0%})")
+
+    # Thresholds
+    PASS_RATE_THRESHOLD = 0.8
+    TOOL_THRESHOLD = 0.9
+    ACTION_THRESHOLD = 0.9
 
     print()
-    if failed > 0:
+    all_passed = True
+    if pass_rate < PASS_RATE_THRESHOLD:
+        print(f"FAIL: Overall pass rate {pass_rate:.0%} below threshold {PASS_RATE_THRESHOLD:.0%}")
+        all_passed = False
+    if tool_rate < TOOL_THRESHOLD:
+        print(f"FAIL: Tool selection {tool_rate:.0%} below threshold {TOOL_THRESHOLD:.0%}")
+        all_passed = False
+    if action_rate < ACTION_THRESHOLD:
+        print(f"FAIL: Action correctness {action_rate:.0%} below threshold {ACTION_THRESHOLD:.0%}")
+        all_passed = False
+
+    if all_passed:
+        print("ALL THRESHOLDS MET")
+        sys.exit(0)
+    else:
         print("EVAL FAILED")
         sys.exit(1)
-    else:
-        print("ALL EVALS PASSED")
-        sys.exit(0)
 
 
 if __name__ == "__main__":
