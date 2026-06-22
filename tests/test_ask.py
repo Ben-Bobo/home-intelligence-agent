@@ -1,7 +1,6 @@
-from fastapi.testclient import TestClient
-from app.main import app
+from tests.conftest import get_client
 
-client = TestClient(app)
+client = get_client()
 
 
 def test_ask_missing_question():
