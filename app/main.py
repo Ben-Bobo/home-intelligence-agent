@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -8,15 +9,9 @@ from app.routes import ingest, ask, actions
 
 logger = get_logger(__name__)
 
-app = FastAPI(title="Home Intelligence Agent")
 
-app.include_router(ingest.router, prefix="/api")
-app.include_router(ask.router, prefix="/api")
-app.include_router(actions.router, prefix="/api")
-
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     settings = get_settings()
     logger.info(
         "Home Intelligence Agent starting | env=%s | model=%s | index=%s",
@@ -24,6 +19,14 @@ async def startup():
         settings.openai_model,
         settings.pinecone_index_name
     )
+    yield
+
+
+app = FastAPI(title="Home Intelligence Agent", lifespan=lifespan)
+
+app.include_router(ingest.router, prefix="/api")
+app.include_router(ask.router, prefix="/api")
+app.include_router(actions.router, prefix="/api")
 
 
 @app.get("/")

@@ -1,0 +1,66 @@
+[
+  {
+    "id": "E001",
+    "question": "What does my mortgage document say about the interest rate?",
+    "expected_tool": "search_home_docs",
+    "expected_action": false
+  },
+  {
+    "id": "E002",
+    "question": "How much does it cost to replace a water heater in New York?",
+    "expected_tool": "web_search",
+    "expected_action": false
+  },
+  {
+    "id": "E003",
+    "question": "Add a reminder to check my smoke detectors every six months.",
+    "expected_tool": "request_action",
+    "expected_action": true,
+    "expected_action_type": ["add_calendar_event", "create_task"]
+  },
+  {
+    "id": "E004",
+    "question": "What are the terms of my home purchase agreement?",
+    "expected_tool": "search_home_docs",
+    "expected_action": false
+  },
+  {
+    "id": "E005",
+    "question": "Find me a plumber near Canandaigua NY.",
+    "expected_tool": "web_search",
+    "expected_action": false
+  },
+  {
+    "id": "E006",
+    "question": "Create a task to repaint the deck this summer. High priority.",
+    "expected_tool": "request_action",
+    "expected_action": true,
+    "expected_action_type": "create_task"
+  },
+  {
+    "id": "E007",
+    "question": "What is the purchase price listed in my mortgage documents?",
+    "expected_tool": "search_home_docs",
+    "expected_action": false,
+    "reference_answer": "The purchase price is up to $750,000"
+  },
+  {
+    "id": "E008",
+    "question": "What is the average cost of a home inspection in upstate New York?",
+    "expected_tool": "web_search",
+    "expected_action": false
+  },
+  {
+    "id": "E009",
+    "question": "Set up a monthly reminder to change my HVAC filter.",
+    "expected_tool": "request_action",
+    "expected_action": true,
+    "expected_action_type": ["add_calendar_event", "create_task"]
+  },
+  {
+    "id": "E010",
+    "question": "Does my mortgage have any prepayment penalties?",
+    "expected_tool": "search_home_docs",
+    "expected_action": false
+  }
+]
