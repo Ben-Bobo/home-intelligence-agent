@@ -47,7 +47,7 @@ def test_extract_actions_finds_request_action():
                 "id": "1",
                 "name": "request_action",
                 "args": {
-                    "action_json": '{"type": "add_calendar_event", "title": "Clean gutters", "frequency": "yearly"}'
+                    "action_json": '{"type": "add_calendar_event", "title": "Clean gutters", "date": "recurring", "frequency": "yearly"}'
                 }
             }]
         ),
@@ -101,7 +101,7 @@ def test_extract_actions_multiple():
                     "id": "1",
                     "name": "request_action",
                     "args": {
-                        "action_json": '{"type": "add_calendar_event", "title": "Clean gutters"}'
+                        "action_json": '{"type": "add_calendar_event", "title": "Clean gutters", "date": "recurring", "frequency": "yearly"}'
                     }
                 },
                 {

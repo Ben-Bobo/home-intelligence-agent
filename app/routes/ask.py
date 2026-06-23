@@ -8,6 +8,7 @@ from app.models.requests import AskRequest
 from app.models.responses import AskResponse, ActionOut
 from app.logger import get_logger
 from fastapi import APIRouter, HTTPException, Depends
+from app.agent.actions import validate_action
 from app.auth import verify_api_key
 
 
@@ -16,7 +17,8 @@ router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 
 def extract_actions(messages: list) -> list[dict]:
-    """Extract actions from request_action tool calls in the message history."""
+    """Extract and validate actions from request_action tool calls."""
+    
     actions = []
     for msg in messages:
         if hasattr(msg, "tool_calls") and msg.tool_calls:
@@ -24,7 +26,11 @@ def extract_actions(messages: list) -> list[dict]:
                 if call["name"] == "request_action":
                     try:
                         action = json.loads(call["args"]["action_json"])
-                        actions.append(action)
+                        result = validate_action(action)
+                        if result["valid"]:
+                            actions.append(result["action"])
+                        else:
+                            logger.warning("Skipping invalid action | errors=%s", result["errors"])
                     except (json.JSONDecodeError, KeyError):
                         pass
     return actions
