@@ -4,7 +4,7 @@ AVAILABLE_ACTIONS = [
         "description": "Add an event or recurring task to the user's Google Calendar",
         "required_fields": {
             "title": "Event title",
-            "date": "Start date (ISO format) or 'recurring'",
+            "date": "Start date (ISO format)",
             "frequency": "once / daily / weekly / monthly (only if recurring)",
             "notes": "Additional details"
         }
