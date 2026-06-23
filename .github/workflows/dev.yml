@@ -26,7 +26,7 @@ jobs:
           LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
           API_SECRET_KEY: ${{ secrets.API_SECRET_KEY }}
           LANGCHAIN_TRACING_V2: "true"
-          LANGCHAIN_PROJECT: "home-intelligence-agent-dev"
+          LANGCHAIN_PROJECT: "home-intelligence-agent-dev-evals"
           ENVIRONMENT: "development"
         run: pytest tests/ -v
 

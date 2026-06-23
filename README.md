@@ -99,3 +99,22 @@ graph TD
 
     Agent -.->|tracing| LangSmith[LangSmith Dashboard]
 ```
+
+## Agent Graph
+```powershell
+python -c "from app.agent.graph import agent; print(agent.get_graph().draw_mermaid())"
+```
+```mermaid
+graph TD;
+        __start__([<p>__start__</p>]):::first
+        reasoning(reasoning)
+        execute_tools(execute_tools)
+        __end__([<p>__end__</p>]):::last
+        __start__ --> reasoning;
+        execute_tools --> reasoning;
+        reasoning -. &nbsp;end&nbsp; .-> __end__;
+        reasoning -.-> execute_tools;
+        classDef default fill:#f2f0ff,line-height:1.2
+        classDef first fill-opacity:0
+        classDef last fill:#bfb6fc
+```
