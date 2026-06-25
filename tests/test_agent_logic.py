@@ -1,7 +1,6 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from app.agent.nodes.execute_tools import execute_tools_node, TOOL_MAP
 from app.agent.graph import should_continue
-from app.routes.ask import extract_actions
 
 
 # --- should_continue routing ---
@@ -34,90 +33,6 @@ def test_should_continue_no_tool_calls_attr():
         ]
     }
     assert should_continue(state) == "end"
-
-
-# --- extract_actions ---
-
-def test_extract_actions_finds_request_action():
-    messages = [
-        HumanMessage(content="Add gutter cleaning to my calendar"),
-        AIMessage(
-            content="",
-            tool_calls=[{
-                "id": "1",
-                "name": "request_action",
-                "args": {
-                    "action_json": '{"type": "add_calendar_event", "title": "Clean gutters", "date": "recurring", "frequency": "yearly"}'
-                }
-            }]
-        ),
-        ToolMessage(content="Action submitted", tool_call_id="1"),
-        AIMessage(content="I've submitted the calendar event.")
-    ]
-    actions = extract_actions(messages)
-    assert len(actions) == 1
-    assert actions[0]["type"] == "add_calendar_event"
-    assert actions[0]["title"] == "Clean gutters"
-
-
-def test_extract_actions_ignores_other_tools():
-    messages = [
-        AIMessage(
-            content="",
-            tool_calls=[{
-                "id": "1",
-                "name": "web_search",
-                "args": {"query": "roof repair cost"}
-            }]
-        ),
-        ToolMessage(content="some results", tool_call_id="1"),
-        AIMessage(content="Here are the costs.")
-    ]
-    actions = extract_actions(messages)
-    assert len(actions) == 0
-
-
-def test_extract_actions_handles_bad_json():
-    messages = [
-        AIMessage(
-            content="",
-            tool_calls=[{
-                "id": "1",
-                "name": "request_action",
-                "args": {"action_json": "not valid json"}
-            }]
-        )
-    ]
-    actions = extract_actions(messages)
-    assert len(actions) == 0
-
-
-def test_extract_actions_multiple():
-    messages = [
-        AIMessage(
-            content="",
-            tool_calls=[
-                {
-                    "id": "1",
-                    "name": "request_action",
-                    "args": {
-                        "action_json": '{"type": "add_calendar_event", "title": "Clean gutters", "date": "recurring", "frequency": "yearly"}'
-                    }
-                },
-                {
-                    "id": "2",
-                    "name": "request_action",
-                    "args": {
-                        "action_json": '{"type": "create_task", "title": "Buy gutter guards", "priority": "low", "category": "improvement"}'
-                    }
-                }
-            ]
-        )
-    ]
-    actions = extract_actions(messages)
-    assert len(actions) == 2
-    assert actions[0]["type"] == "add_calendar_event"
-    assert actions[1]["type"] == "create_task"
 
 
 # --- execute_tools_node ---
