@@ -1,33 +1,17 @@
 import uuid
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from langchain_core.messages import HumanMessage
 from app.agent.graph import agent
+from app.agent.state import create_initial_state
 from app.queue import action_queue
+from app.auth import verify_api_key
 from app.models.requests import AskRequest
 from app.models.responses import AskResponse, ActionOut
 from app.logger import get_logger
-from fastapi import APIRouter, HTTPException, Depends
-from app.auth import verify_api_key
-
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(verify_api_key)])
-
-
-def extract_actions(messages: list) -> list[dict]:
-    """Extract actions from request_action tool calls in the message history."""
-    actions = []
-    for msg in messages:
-        if hasattr(msg, "tool_calls") and msg.tool_calls:
-            for call in msg.tool_calls:
-                if call["name"] == "request_action":
-                    try:
-                        action = json.loads(call["args"]["action_json"])
-                        actions.append(action)
-                    except (json.JSONDecodeError, KeyError):
-                        pass
-    return actions
 
 
 @router.post("/ask", response_model=AskResponse)
@@ -46,15 +30,7 @@ async def ask(request: AskRequest):
 
     human_message = HumanMessage(content=content)
 
-    initial_state = {
-        "question": request.question,
-        "image": request.image,
-        "thread_id": thread_id,
-        "messages": [human_message],
-        "actions": [],
-        "answer": "",
-        "error": None
-    }
+    initial_state = create_initial_state([human_message])
 
     config = {"configurable": {"thread_id": thread_id}}
 
@@ -64,9 +40,10 @@ async def ask(request: AskRequest):
         last_message = result["messages"][-1]
         answer_text = last_message.content if last_message.content else ""
 
-        actions = extract_actions(result["messages"])
+        # Actions are already validated and in state
+        actions = result.get("actions", [])
 
-        # Store actions in the queue for n8n to pick up
+        # Store in queue for n8n
         for action in actions:
             action_queue.add(action)
 

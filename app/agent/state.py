@@ -4,10 +4,11 @@ from langgraph.graph import add_messages
 
 
 class AgentState(TypedDict):
-    question: str
-    image: Optional[str]
-    thread_id: Optional[str]
     messages: Annotated[list[BaseMessage], add_messages]
     actions: list[dict]
-    answer: str
-    error: Optional[str]
+
+def create_initial_state(messages: list[BaseMessage]) -> AgentState:
+    return {
+        "messages": messages,
+        "actions": []
+    }

@@ -1,22 +1,15 @@
+import json
 from langchain_core.messages import ToolMessage
 from app.agent.state import AgentState
-from app.agent.tools.search_home_docs import search_home_docs
-from app.agent.tools.web_search import web_search
-from app.agent.tools.image_analysis import analyze_image
-from app.agent.tools.request_action import request_action
+from app.agent.tools import ALL_TOOLS
+from app.agent.actions import validate_action
 from app.logger import get_logger
 
 logger = get_logger(__name__)
 
-TOOL_MAP = {
-    "search_home_docs": search_home_docs,
-    "web_search": web_search,
-    "analyze_image": analyze_image,
-    "request_action": request_action,
-}
+TOOL_MAP = {tool.name: tool for tool in ALL_TOOLS}
 
 MAX_ITERATIONS = 5
-
 
 def execute_tools_node(state: AgentState) -> dict:
     last_message = state["messages"][-1]
@@ -40,6 +33,8 @@ def execute_tools_node(state: AgentState) -> dict:
         }
 
     results = []
+    new_actions = []
+
     for call in tool_calls:
         tool_name = call["name"]
         tool_args = call["args"]
@@ -53,6 +48,17 @@ def execute_tools_node(state: AgentState) -> dict:
         else:
             try:
                 result = tool_fn.invoke(tool_args)
+
+                # If this was a request_action, capture the validated action
+                if tool_name == "request_action" and "Error" not in result:
+                    try:
+                        action = json.loads(tool_args["action_json"])
+                        validated = validate_action(action)
+                        if validated["valid"]:
+                            new_actions.append(validated["action"])
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+
             except Exception as e:
                 logger.error("Tool %s failed: %s", tool_name, str(e))
                 result = f"Error calling {tool_name}: {str(e)}"
@@ -64,4 +70,8 @@ def execute_tools_node(state: AgentState) -> dict:
             )
         )
 
-    return {"messages": results}
+    output = {"messages": results}
+    if new_actions:
+        output["actions"] = state.get("actions", []) + new_actions
+
+    return output
