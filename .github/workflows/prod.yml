@@ -40,3 +40,7 @@ jobs:
           LANGCHAIN_PROJECT: "home-intelligence-agent-prod-evals"
           ENVIRONMENT: "production"
         run: python evals/run_evals.py
+
+      - name: Deploy to Render
+        if: success()
+        run: curl -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}"
