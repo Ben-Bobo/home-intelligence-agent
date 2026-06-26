@@ -1,7 +1,7 @@
 import json
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
-from app.agent.actions import AVAILABLE_ACTIONS, VALID_ACTION_TYPES
+from app.agent.actions import AVAILABLE_ACTIONS, validate_action
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -41,11 +41,15 @@ def _request_action(action_json: str) -> str:
     except json.JSONDecodeError:
         return "Error: Invalid JSON. Please pass a valid JSON string."
 
-    action_type = action.get("type")
-    if action_type not in VALID_ACTION_TYPES:
-        return f"Error: Unknown action type '{action_type}'. Valid types: {', '.join(VALID_ACTION_TYPES)}"
+    result = validate_action(action)
 
-    return f"Action submitted: {action_type} — {action.get('title', action.get('message', ''))}. This will be processed shortly by the automation system."
+    if not result["valid"]:
+        error_msg = "; ".join(result["errors"])
+        logger.warning("Tool: request_action | validation failed | %s", error_msg)
+        return f"Error: Action validation failed. {error_msg}. Please fix and try again."
+
+    cleaned = result["action"]
+    return f"Action submitted: {cleaned['type']} — {cleaned.get('title', cleaned.get('message', ''))}. This will be processed shortly by the automation system."
 
 
 request_action = StructuredTool.from_function(

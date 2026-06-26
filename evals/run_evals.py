@@ -10,7 +10,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from app.agent.graph import agent
-from app.routes.ask import extract_actions
+from app.agent.state import create_initial_state
 from app.config import get_settings
 
 
@@ -80,15 +80,7 @@ def run_evals():
         thread_id = str(uuid.uuid4())
         human_message = HumanMessage(content=[{"type": "text", "text": item["question"]}])
 
-        initial_state = {
-            "question": item["question"],
-            "image": None,
-            "thread_id": thread_id,
-            "messages": [human_message],
-            "actions": [],
-            "answer": "",
-            "error": None
-        }
+        initial_state = create_initial_state([human_message])
 
         config = {"configurable": {"thread_id": thread_id}}
 
@@ -112,7 +104,7 @@ def run_evals():
                 results["tool_selection"]["correct"] += 1
 
             # LLM-as-judge for answer quality
-            actions = extract_actions(messages)
+            actions = result.get("actions", [])
             judge_scores = llm_judge(item["question"], answer, actions_taken=actions, reference_answer=item.get("reference_answer"))
             
             relevance = judge_scores.get("relevance", 0)
@@ -126,7 +118,7 @@ def run_evals():
             answer_good = avg_quality >= 0.6 and relevance >= MIN_SCORE and groundedness >= MIN_SCORE and completeness >= MIN_SCORE
 
             # Check action correctness
-            actions = extract_actions(messages)
+            actions = result.get("actions", [])
             if item.get("expected_action"):
                 has_action = len(actions) > 0
                 expected_types = item.get("expected_action_type")
