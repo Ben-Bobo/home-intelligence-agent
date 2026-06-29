@@ -32,10 +32,16 @@ with tab1:
         st.session_state.thread_id = str(uuid.uuid4())
     if "messages" not in st.session_state:
         st.session_state.messages = []
+    if "pending_approval" not in st.session_state:
+        st.session_state.pending_approval = None
+    if "pending_response" not in st.session_state:
+        st.session_state.pending_response = None
 
     if st.button("New conversation"):
         st.session_state.thread_id = str(uuid.uuid4())
         st.session_state.messages = []
+        st.session_state.pending_approval = None
+        st.session_state.pending_response = None
         st.rerun()
 
     # Display chat history
@@ -44,6 +50,71 @@ with tab1:
             for msg in st.session_state.messages:
                 with st.chat_message(msg["role"]):
                     st.write(msg["content"])
+
+    # HITL approval UI
+    if st.session_state.pending_approval:
+        pending = st.session_state.pending_approval
+        action = pending.get("action", {})
+
+        with st.container(border=True):
+            st.warning(f"**Action requires your approval:** {pending.get('message', '')}")
+            st.json(action)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Approve", type="primary", use_container_width=True):
+                    with st.spinner("Submitting action..."):
+                        try:
+                            resp = requests.post(
+                                f"{API_URL}/api/resume",
+                                json={"thread_id": st.session_state.thread_id, "approved": True},
+                                headers=HEADERS,
+                                timeout=60
+                            )
+                            st.session_state.pending_approval = None
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                answer = data["answer"]
+                                if data.get("actions"):
+                                    answer += "\n" + "\n".join(
+                                        f"\n> Action submitted: **{a['type']}**"
+                                        for a in data["actions"]
+                                    )
+                            else:
+                                answer = f"Error resuming: {resp.status_code}"
+                            st.session_state.messages.append({"role": "assistant", "content": answer})
+                            st.session_state.pending_response = answer
+                        except requests.exceptions.RequestException as e:
+                            st.session_state.pending_approval = None
+                            answer = f"Connection error: {e}"
+                            st.session_state.messages.append({"role": "assistant", "content": answer})
+                            st.session_state.pending_response = answer
+                    st.rerun()
+            with col2:
+                if st.button("Reject", use_container_width=True):
+                    with st.spinner("Rejecting action..."):
+                        try:
+                            resp = requests.post(
+                                f"{API_URL}/api/resume",
+                                json={"thread_id": st.session_state.thread_id, "approved": False},
+                                headers=HEADERS,
+                                timeout=60
+                            )
+                            st.session_state.pending_approval = None
+                            data = resp.json() if resp.status_code == 200 else {}
+                            answer = data.get("answer", "Action rejected.")
+                        except requests.exceptions.RequestException:
+                            st.session_state.pending_approval = None
+                            answer = "Action rejected."
+                        st.session_state.messages.append({"role": "assistant", "content": answer})
+                        st.session_state.pending_response = answer
+                    st.rerun()
+
+    # Show the response from an approval/rejection outside the history expander
+    if st.session_state.pending_response:
+        with st.chat_message("assistant"):
+            st.write(st.session_state.pending_response)
+        st.session_state.pending_response = None
 
     # Image upload
     uploaded_image = st.file_uploader(
@@ -84,6 +155,11 @@ with tab1:
                     elif response.status_code == 200:
                         data = response.json()
                         answer = data["answer"]
+                        st.session_state.thread_id = data["thread_id"]
+
+                        if data.get("pending_approval"):
+                            st.session_state.pending_approval = data["pending_approval"]
+                            st.rerun()
 
                         if data.get("actions"):
                             action_lines = "\n".join(
@@ -91,8 +167,6 @@ with tab1:
                                 for a in data["actions"]
                             )
                             answer += action_lines
-
-                        st.session_state.thread_id = data["thread_id"]
                     else:
                         answer = f"Error: {response.status_code} — {response.text}"
 
@@ -119,6 +193,27 @@ with tab2:
         "general"
     ])
 
+    custom_chunk_size = 0
+    custom_chunk_overlap = 0
+    with st.expander("Advanced settings"):
+        col1, col2 = st.columns(2)
+        with col1:
+            custom_chunk_size = st.number_input(
+                "Chunk size (0 = auto)",
+                min_value=0,
+                max_value=2000,
+                value=0,
+                step=50
+            )
+        with col2:
+            custom_chunk_overlap = st.number_input(
+                "Chunk overlap (0 = auto)",
+                min_value=0,
+                max_value=500,
+                value=0,
+                step=10
+            )
+
     uploaded_file = st.file_uploader("Choose a file", type=["pdf", "txt", "md"])
 
     if st.button("Upload & Ingest") and uploaded_file:
@@ -126,6 +221,11 @@ with tab2:
             try:
                 files = {"file": (uploaded_file.name, uploaded_file, uploaded_file.type)}
                 data = {"doc_type": doc_type}
+                if custom_chunk_size > 0:
+                    data["chunk_size"] = str(custom_chunk_size)
+                if custom_chunk_overlap > 0:
+                    data["chunk_overlap"] = str(custom_chunk_overlap)
+
                 response = requests.post(
                     f"{API_URL}/api/ingest",
                     files=files,
@@ -137,7 +237,10 @@ with tab2:
                 if response.status_code == 200:
                     result = response.json()
                     if result["success"]:
-                        st.success(f"Ingested {result['filename']} into {result['chunks_stored']} chunks.")
+                        st.success(
+                            f"Ingested {result['filename']} into {result['chunks_stored']} chunks "
+                            f"(size={result['chunk_size']}, overlap={result['chunk_overlap']})"
+                        )
                     else:
                         st.error("Ingestion failed.")
                 elif response.status_code == 401:

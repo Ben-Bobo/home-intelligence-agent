@@ -47,7 +47,7 @@ AVAILABLE_ACTIONS = [
     },
     {
         "type": "send_notification",
-        "description": "Send the user an alert via Slack or email about something urgent",
+        "description": "Send the user an alert via Slack or email",
         "required_fields": {k: v.description or k for k, v in Notification.model_fields.items() if k != "type"}
     }
 ]

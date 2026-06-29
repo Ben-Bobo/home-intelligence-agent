@@ -1,5 +1,5 @@
 from langchain_core.tools import tool
-from app.rag.vectorstore import retrieve_with_scores
+from app.rag.vectorstore import retrieve_hybrid
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,21 +14,22 @@ def search_home_docs(query: str) -> str:
 
     logger.info("Tool: search_home_docs | query=%.80s", query)
 
-    results = retrieve_with_scores(query)
+    results = retrieve_hybrid(query)
 
     if not results:
         return "No relevant documents found in the home knowledge base."
 
     output_parts = []
-    for i, (doc, score) in enumerate(results):
-        meta = doc.metadata
+    for i, result in enumerate(results):
+        meta = result["metadata"]
         doc_type = meta.get("document_type", "document")
         filename = meta.get("filename", "unknown")
         chunk_index = meta.get("chunk_index", "?")
         total_chunks = meta.get("total_chunks", "?")
+        reranked = " | reranked" if result.get("reranked") else ""
 
         output_parts.append(
-            f"[Source {i+1} | relevance: {score:.4f} | {doc_type} | {filename} | chunk {chunk_index}/{total_chunks}]:\n{doc.page_content}"
+            f"[Source {i+1} | relevance: {result['score']:.4f} | {doc_type} | {filename} | chunk {chunk_index}/{total_chunks}{reranked}]:\n{result['content']}"
         )
 
     return "\n\n".join(output_parts)
