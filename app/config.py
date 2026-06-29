@@ -19,10 +19,11 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_timeout: int = 30
 
-    # Pinecone
+    # RAG
     pinecone_api_key: str = ""
     pinecone_index_name: str = "home-intelligence"
-    rag_top_k: int = 4
+    rag_top_k: int = 15
+    rag_alpha: float = 0.7  # 1.0 = pure semantic, 0.0 = pure keyword
 
     # Chunking
     chunk_size: int = 800
