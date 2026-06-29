@@ -1,0 +1,11 @@
+{
+  "dataset": "evals/dataset.json",
+  "judge_model": "gpt-4o-mini",
+  "thresholds": {
+    "pass_rate": 0.8,
+    "tool_selection": 0.9,
+    "action_correctness": 0.9,
+    "answer_quality_avg": 0.6,
+    "answer_quality_min_per_dimension": 0.3
+  }
+}

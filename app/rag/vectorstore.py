@@ -13,12 +13,8 @@ _bm25_encoder = None
 def get_bm25_encoder() -> BM25Encoder:
     global _bm25_encoder
     if _bm25_encoder is None:
-        try:
-            _bm25_encoder = BM25Encoder().load("bm25_params.json")
-            logger.info("BM25 encoder loaded from bm25_params.json")
-        except Exception:
-            _bm25_encoder = BM25Encoder().default()
-            logger.info("BM25 encoder initialized with defaults")
+        _bm25_encoder = BM25Encoder().default()
+        logger.info("BM25 encoder initialized with defaults")
     return _bm25_encoder
 
 
@@ -215,11 +211,3 @@ def _format_results(matches: list) -> list:
     return formatted
 
 
-def fit_bm25(texts: list[str]):
-    """Fit BM25 encoder to a corpus and save parameters."""
-    bm25 = BM25Encoder()
-    bm25.fit(texts)
-    bm25.dump("bm25_params.json")
-    global _bm25_encoder
-    _bm25_encoder = bm25
-    logger.info("BM25 encoder fitted to %d documents and saved", len(texts))
