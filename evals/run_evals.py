@@ -4,21 +4,28 @@ import uuid
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).parent.parent / ".env")
 sys.path.append(str(Path(__file__).parent.parent))
 
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
+from langgraph.types import Command
 from app.agent.graph import agent
 from app.agent.state import create_initial_state
 from app.config import get_settings
 
 
-def llm_judge(question: str, answer: str, actions_taken: list = None, reference_answer: str = None) -> dict:
+def load_config() -> dict:
+    config_path = Path(__file__).parent / "config.json"
+    with open(config_path) as f:
+        return json.load(f)
+
+
+def llm_judge(question: str, answer: str, actions_taken: list = None, reference_answer: str = None, judge_model: str = None) -> dict:
     """Use an LLM to score the answer quality."""
     settings = get_settings()
     judge = ChatOpenAI(
-        model=settings.openai_model,
+        model=judge_model or settings.openai_model,
         api_key=settings.openai_api_key,
         timeout=settings.openai_timeout
     )
@@ -61,7 +68,11 @@ def llm_judge(question: str, answer: str, actions_taken: list = None, reference_
 
 
 def run_evals():
-    with open("evals/dataset.json") as f:
+    eval_config = load_config()
+    thresholds = eval_config["thresholds"]
+
+    dataset_path = Path(__file__).parent.parent / eval_config["dataset"]
+    with open(dataset_path) as f:
         dataset = json.load(f)
 
     results = {
@@ -86,6 +97,16 @@ def run_evals():
 
         try:
             result = agent.invoke(initial_state, config=config)
+
+            # Auto-approve any HITL interrupts — evals don't need human gating
+            graph_state = agent.get_state(config)
+            if graph_state.tasks:
+                for task in graph_state.tasks:
+                    if task.interrupts:
+                        print(f"  [HITL] Auto-approving interrupt for eval")
+                        result = agent.invoke(Command(resume=True), config=config)
+                        break
+
             messages = result["messages"]
             last_message = messages[-1]
             answer = last_message.content if last_message.content else ""
@@ -105,7 +126,7 @@ def run_evals():
 
             # LLM-as-judge for answer quality
             actions = result.get("actions", [])
-            judge_scores = llm_judge(item["question"], answer, actions_taken=actions, reference_answer=item.get("reference_answer"))
+            judge_scores = llm_judge(item["question"], answer, actions_taken=actions, reference_answer=item.get("reference_answer"), judge_model=eval_config["judge_model"])
             
             relevance = judge_scores.get("relevance", 0)
             groundedness = judge_scores.get("groundedness", 0)
@@ -114,8 +135,8 @@ def run_evals():
             
             results["answer_quality"]["scores"].append(avg_quality)
             
-            MIN_SCORE = 0.3
-            answer_good = avg_quality >= 0.6 and relevance >= MIN_SCORE and groundedness >= MIN_SCORE and completeness >= MIN_SCORE
+            min_dim = thresholds["answer_quality_min_per_dimension"]
+            answer_good = avg_quality >= thresholds["answer_quality_avg"] and relevance >= min_dim and groundedness >= min_dim and completeness >= min_dim
 
             # Check action correctness
             actions = result.get("actions", [])
@@ -190,21 +211,16 @@ def run_evals():
     action_rate = action_correct / action_total if action_total > 0 else 0
     print(f"  action_correctness: {action_correct}/{action_total} ({action_rate:.0%})")
 
-    # Thresholds
-    PASS_RATE_THRESHOLD = 0.8
-    TOOL_THRESHOLD = 0.9
-    ACTION_THRESHOLD = 0.9
-
     print()
     all_passed = True
-    if pass_rate < PASS_RATE_THRESHOLD:
-        print(f"FAIL: Overall pass rate {pass_rate:.0%} below threshold {PASS_RATE_THRESHOLD:.0%}")
+    if pass_rate < thresholds["pass_rate"]:
+        print(f"FAIL: Overall pass rate {pass_rate:.0%} below threshold {thresholds['pass_rate']:.0%}")
         all_passed = False
-    if tool_rate < TOOL_THRESHOLD:
-        print(f"FAIL: Tool selection {tool_rate:.0%} below threshold {TOOL_THRESHOLD:.0%}")
+    if tool_rate < thresholds["tool_selection"]:
+        print(f"FAIL: Tool selection {tool_rate:.0%} below threshold {thresholds['tool_selection']:.0%}")
         all_passed = False
-    if action_rate < ACTION_THRESHOLD:
-        print(f"FAIL: Action correctness {action_rate:.0%} below threshold {ACTION_THRESHOLD:.0%}")
+    if action_rate < thresholds["action_correctness"]:
+        print(f"FAIL: Action correctness {action_rate:.0%} below threshold {thresholds['action_correctness']:.0%}")
         all_passed = False
 
     if all_passed:
