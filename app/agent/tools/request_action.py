@@ -49,6 +49,7 @@ def _request_action(action_json: str) -> str:
         return f"Error: Action validation failed. {error_msg}. Please fix and try again."
 
     cleaned = result["action"]
+
     return f"Action submitted: {cleaned['type']} — {cleaned.get('title', cleaned.get('message', ''))}. This will be processed shortly by the automation system."
 
 

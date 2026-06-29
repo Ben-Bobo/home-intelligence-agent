@@ -1,5 +1,7 @@
 import json
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import ToolMessage, HumanMessage
+from langgraph.types import interrupt
+from langgraph.errors import GraphInterrupt
 from app.agent.state import AgentState
 from app.agent.tools import ALL_TOOLS
 from app.agent.actions import validate_action
@@ -17,8 +19,13 @@ def execute_tools_node(state: AgentState) -> dict:
 
     logger.info("Node: execute_tools | tool_calls=%d", len(tool_calls))
 
+    messages = state["messages"]
+    last_human = next(
+        (i for i in reversed(range(len(messages))) if isinstance(messages[i], HumanMessage)),
+        0
+    )
     tool_call_count = sum(
-        1 for msg in state["messages"]
+        1 for msg in messages[last_human:]
         if hasattr(msg, "tool_calls") and msg.tool_calls
     )
     if tool_call_count > MAX_ITERATIONS:
@@ -55,10 +62,28 @@ def execute_tools_node(state: AgentState) -> dict:
                         action = json.loads(tool_args["action_json"])
                         validated = validate_action(action)
                         if validated["valid"]:
+                            # HITL APPROVAL
+                            approved = interrupt({
+                                "type": "approval",
+                                "message": f"Approve action {action['type']}?",
+                                "action": action,
+                            })
+
+                            if not approved:
+                                return {
+                                    "messages": [
+                                        ToolMessage(
+                                            content="Action rejected by user.",
+                                            tool_call_id=call["id"]
+                                        )
+                                    ]
+                                }
+
                             new_actions.append(validated["action"])
                     except (json.JSONDecodeError, KeyError):
                         pass
-
+            except GraphInterrupt:
+                raise
             except Exception as e:
                 logger.error("Tool %s failed: %s", tool_name, str(e))
                 result = f"Error calling {tool_name}: {str(e)}"

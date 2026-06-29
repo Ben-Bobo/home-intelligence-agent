@@ -1,12 +1,12 @@
 import os
 import tempfile
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from app.rag.ingestor import ingest_document
 from app.models.responses import IngestResponse
 from app.errors import DocumentIngestionError
-from app.logger import get_logger
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from app.auth import verify_api_key
+from app.logger import get_logger
+from typing import Optional
 
 logger = get_logger(__name__)
 router = APIRouter(dependencies=[Depends(verify_api_key)])
@@ -17,9 +17,12 @@ ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest(
     file: UploadFile = File(...),
-    doc_type: str = Form(default="general")
+    doc_type: str = Form(default="general"),
+    chunk_size: Optional[int] = Form(default=None),
+    chunk_overlap: Optional[int] = Form(default=None)
 ):
-    logger.info("Ingest request | file=%s | type=%s", file.filename, doc_type)
+    logger.info("Ingest request | file=%s | type=%s | chunk_size=%s | overlap=%s",
+                file.filename, doc_type, chunk_size, chunk_overlap)
 
     ext = os.path.splitext(file.filename)[1].lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -35,13 +38,15 @@ async def ingest(
             tmp.write(content)
             tmp_path = tmp.name
 
-        chunks_stored = ingest_document(tmp_path, file.filename, doc_type)
+        result = ingest_document(tmp_path, file.filename, doc_type, chunk_size, chunk_overlap)
 
         return IngestResponse(
             success=True,
             filename=file.filename,
-            chunks_stored=chunks_stored,
-            message=f"Successfully ingested {file.filename} into {chunks_stored} chunks."
+            chunks_stored=result["chunks_stored"],
+            chunk_size=result["chunk_size"],
+            chunk_overlap=result["chunk_overlap"],
+            message=f"Ingested {file.filename} into {result['chunks_stored']} chunks (size={result['chunk_size']}, overlap={result['chunk_overlap']})."
         )
 
     except DocumentIngestionError as e:
