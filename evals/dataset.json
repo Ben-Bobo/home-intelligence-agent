@@ -42,7 +42,7 @@
     "question": "What is the purchase price listed in my mortgage documents?",
     "expected_tool": "search_home_docs",
     "expected_action": false,
-    "reference_answer": "The purchase price is up to $750,000"
+    "reference_answer": "$750,000"
   },
   {
     "id": "E008",
@@ -59,7 +59,7 @@
   },
   {
     "id": "E010",
-    "question": "Does my mortgage have any prepayment penalties?",
+    "question": "Who is the listing agents realtor in the mortgage docs for 120 cline rd?",
     "expected_tool": "search_home_docs",
     "expected_action": false
   }
