@@ -10,11 +10,36 @@ logger = get_logger(__name__)
 _bm25_encoder = None
 
 
-def get_bm25_encoder() -> BM25Encoder:
+def _fetch_all_corpus_texts(index) -> list:
+    """Pull every chunk's text already stored in the index, so BM25 can be
+    fit on the corpus it will actually search instead of a generic dataset."""
+    texts = []
+    for id_batch in index.list():
+        fetched = index.fetch(ids=id_batch)
+        for vector in fetched.vectors.values():
+            text = vector.metadata.get("text", "")
+            if text:
+                texts.append(text)
+    return texts
+
+
+def _fit_bm25(texts: list) -> BM25Encoder:
+    bm25 = BM25Encoder()
+    bm25.fit(texts)
+    return bm25
+
+
+def get_bm25_encoder():
+    """Lazily fit a BM25 encoder on the documents already in the index.
+    Returns None if the index has no documents yet."""
     global _bm25_encoder
     if _bm25_encoder is None:
-        _bm25_encoder = BM25Encoder().default()
-        logger.info("BM25 encoder initialized with defaults")
+        texts = _fetch_all_corpus_texts(get_pinecone_index())
+        if not texts:
+            logger.info("BM25 encoder skipped | index has no documents yet")
+            return None
+        _bm25_encoder = _fit_bm25(texts)
+        logger.info("BM25 encoder fit on %d chunks from index", len(texts))
     return _bm25_encoder
 
 
@@ -39,12 +64,18 @@ def get_embeddings():
 
 def upsert_documents(chunks: list) -> int:
     """Upsert documents with both dense and sparse vectors."""
+    global _bm25_encoder
     index = get_pinecone_index()
     embeddings = get_embeddings()
-    bm25 = get_bm25_encoder()
 
     texts = [chunk.page_content for chunk in chunks]
     metadatas = [chunk.metadata for chunk in chunks]
+
+    # Fit BM25 on the existing corpus plus these new chunks, so the new
+    # vectors' sparse values (and future queries) reflect the full corpus.
+    existing_texts = _fetch_all_corpus_texts(index)
+    bm25 = _fit_bm25(existing_texts + texts)
+    _bm25_encoder = bm25
 
     dense_vectors = embeddings.embed_documents(texts)
     sparse_vectors = bm25.encode_documents(texts)
@@ -101,25 +132,29 @@ def retrieve_hybrid(query: str, k: int = None, alpha: float = None, rerank: bool
         embeddings = get_embeddings()
         bm25 = get_bm25_encoder()
 
-        # Step 2: Generate both vector types
+        # Step 2: Generate dense vector, and sparse vector if a corpus exists to score against
         dense_vector = embeddings.embed_query(search_query)
-        sparse_vector = bm25.encode_queries([search_query])[0]
-
         scaled_dense = [v * alpha for v in dense_vector]
-        scaled_sparse = {
-            "indices": sparse_vector["indices"],
-            "values": [v * (1 - alpha) for v in sparse_vector["values"]]
-        }
 
         # Retrieve more candidates if reranking (reranker will narrow down)
         retrieve_k = k * 3 if rerank else k
 
-        results = index.query(
-            vector=scaled_dense,
-            sparse_vector=scaled_sparse,
-            top_k=retrieve_k,
-            include_metadata=True
-        )
+        query_kwargs = {
+            "vector": scaled_dense,
+            "top_k": retrieve_k,
+            "include_metadata": True
+        }
+
+        if bm25 is not None:
+            sparse_vector = bm25.encode_queries([search_query])[0]
+            query_kwargs["sparse_vector"] = {
+                "indices": sparse_vector["indices"],
+                "values": [v * (1 - alpha) for v in sparse_vector["values"]]
+            }
+        else:
+            logger.info("RAG hybrid retrieve | no documents indexed yet, dense-only query")
+
+        results = index.query(**query_kwargs)
 
         if not results.matches:
             logger.info("RAG hybrid retrieve | no matches found")
