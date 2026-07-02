@@ -1,0 +1,473 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        -16
+      ],
+      "id": "16f78763-b6e8-4477-947d-5778e96bae34",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "={{$vars.home_intelligent_agent_base_url}}/actions/pending",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "REQUIRED"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        224,
+        -16
+      ],
+      "id": "257bc120-f368-4e37-a6eb-80e1d85f0b9f",
+      "name": "HTTP Request: Get Pending Actions"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6f9a88c2-84ed-4a9f-8fc4-d1af691e591a",
+              "leftValue": "={{ $json.actions }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "array",
+                "operation": "lengthGt",
+                "rightType": "number"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        -16
+      ],
+      "id": "d548128d-bdf7-4306-928c-0beae96974c6",
+      "name": "If: Not Empty"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "actions",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        672,
+        -16
+      ],
+      "id": "084b5cbe-3cb6-4842-8183-81dcad246938",
+      "name": "Split Out: By Action"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "add_calendar_event",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "d5b1e27a-d6dd-49c6-b5ed-fd174be4b605"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "4fc9e8c0-8d09-4452-bce9-ddf16ddfe813",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "create_task",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "ef4dbaa6-b6fb-4760-aba1-5db4ed41b9cb",
+                    "leftValue": "={{ $json.type }}",
+                    "rightValue": "send_notification",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        896,
+        -32
+      ],
+      "id": "f4b27ae9-1cd1-4de7-9d08-3a00e338aeb9",
+      "name": "Switch: Action Type"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "benbobo360@gmail.com",
+          "mode": "list",
+          "cachedResultName": "benbobo360@gmail.com"
+        },
+        "start": "={{ $json.data.date }}",
+        "end": "={{ $json.data.date.toDateTime().plus(1,hour) }}",
+        "additionalFields": {
+          "description": "={{ $json.data.notes }}",
+          "summary": "={{ $json.data.title }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        1152,
+        -272
+      ],
+      "id": "619abe0e-4e7e-4dad-b9a7-25a8c2a92c11",
+      "name": "Create an event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "DEir0C7t65aYjth4",
+          "name": "Google Calendar OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$vars.home_intelligent_agent_base_url}}/actions/complete",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "REQUIRED"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "action_id",
+              "value": "={{ $('Split Out: By Action').item.json.action_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1312,
+        -272
+      ],
+      "id": "8f31a963-1c32-436b-9ad2-af82c9f0e723",
+      "name": "HTTP Request: Post Completed"
+    },
+    {
+      "parameters": {
+        "sendTo": "benbobo360@gmail.com",
+        "subject": "Action Created",
+        "message": "=The action {{ $('Split Out: By Action').item.json.data.title }} has been added to your calendar for {{ $('Create an event').item.json.start.dateTime }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1472,
+        -272
+      ],
+      "id": "b1412f35-bf4f-4adb-8ecc-18537e3e189d",
+      "name": "Send a message",
+      "webhookId": "c6cb51ca-8850-4e90-8450-de4b39174016",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "SIb6WmMqqWb2HTCC",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "benbobo360@gmail.com",
+        "subject": "=New Message From Home Intelligence Agent",
+        "message": "={{ $json.data.urgency }} - \n{{ $json.data.message }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1152,
+        320
+      ],
+      "id": "862c9dc1-a35b-4e68-956d-c9848f53eca1",
+      "name": "Send a message1",
+      "webhookId": "390d2f49-c86d-4380-92ca-963d53940ecd",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "SIb6WmMqqWb2HTCC",
+          "name": "Gmail OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$vars.home_intelligent_agent_base_url}}/actions/complete",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "REQUIRED"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "action_id",
+              "value": "={{ $('Split Out: By Action').item.json.action_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1312,
+        320
+      ],
+      "id": "c3aea149-7c0f-4c22-a1a4-9c39f1e4025d",
+      "name": "HTTP Request: Post Completed1"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request: Get Pending Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request: Get Pending Actions": {
+      "main": [
+        [
+          {
+            "node": "If: Not Empty",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: Not Empty": {
+      "main": [
+        [
+          {
+            "node": "Split Out: By Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Split Out: By Action": {
+      "main": [
+        [
+          {
+            "node": "Switch: Action Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: Action Type": {
+      "main": [
+        [
+          {
+            "node": "Create an event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [],
+        [
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request: Post Completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request: Post Completed": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request: Post Completed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {
+    "HTTP Request: Get Pending Actions": [
+      {
+        "actions": [
+          {
+            "action_id": "b9671f3a-4303-43ce-9e6d-13f01cfd553b",
+            "type": "send_notification",
+            "data": {
+              "message": "Call Abby",
+              "urgency": "normal"
+            },
+            "status": "pending",
+            "created_at": "2026-07-01T02:36:53.182329"
+          }
+        ]
+      }
+    ],
+    "HTTP Request: Post Completed": [
+      {
+        "success": true,
+        "action_id": "6da39e95-cd4f-4c73-9a1b-a472724441cc"
+      }
+    ],
+    "HTTP Request: Post Completed1": [
+      {
+        "success": true,
+        "action_id": "6da39e95-cd4f-4c73-9a1b-a472724441cc"
+      }
+    ]
+  },
+  "nodeGroups": [
+    {
+      "id": "ff7a7be6-3e9c-468d-96c7-ec5d3cc92ccf",
+      "nodeIds": [
+        "619abe0e-4e7e-4dad-b9a7-25a8c2a92c11",
+        "8f31a963-1c32-436b-9ad2-af82c9f0e723",
+        "b1412f35-bf4f-4adb-8ecc-18537e3e189d"
+      ],
+      "name": "Add Calendar Event"
+    },
+    {
+      "id": "0a401ab0-efd8-4746-975f-9913cf47b0bb",
+      "nodeIds": [
+        "862c9dc1-a35b-4e68-956d-c9848f53eca1",
+        "c3aea149-7c0f-4c22-a1a4-9c39f1e4025d"
+      ],
+      "name": "Send Notification"
+    }
+  ],
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ad5ba9bcbfab5eebefc289ecfdf6ebaefc327c617eaf16de5ac29e1059f9691a"
+  }
+}

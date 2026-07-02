@@ -36,7 +36,7 @@ def get_reasoning_node():
             return {"messages": [response]}
 
         except Exception as e:
-            logger.error("Node: reasoning | FAILED | %s", str(e))
+            logger.error("Node: reasoning | FAILED | %s", str(e), exc_info=True)
             from langchain_core.messages import AIMessage
             error_msg = AIMessage(content="I encountered an error while processing your question. Please try again.")
             return {"messages": [error_msg]}

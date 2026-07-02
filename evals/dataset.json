@@ -59,7 +59,7 @@
   },
   {
     "id": "E010",
-    "question": "Who is the listing agents realtor in the mortgage docs for 120 cline rd?",
+    "question": "Who is the listing agent realtor in the mortgage docs for 120 cline rd?",
     "expected_tool": "search_home_docs",
     "expected_action": false
   }
