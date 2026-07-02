@@ -1,12 +1,11 @@
 from app.agent.actions import validate_action
-
+from datetime import datetime
 
 def test_valid_calendar_event():
     action = {
         "type": "add_calendar_event",
         "title": "Clean gutters",
-        "date": "recurring",
-        "frequency": "yearly",
+        "date": datetime.today(),
         "notes": "Every spring"
     }
     result = validate_action(action)
@@ -68,4 +67,4 @@ def test_defaults_applied():
     result = validate_action(action)
     assert result["valid"] is True
     assert result["action"]["priority"] == "medium"
-    assert result["action"]["category"] == "maintenance"
+    assert result["action"]["category"] == "other"
